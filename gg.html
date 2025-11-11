@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zombie Survival - Operation Antidote (Unlimited Ammo)</title>
+<style>
+/* ===== CSS Styles (unchanged, shortened comments) ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+#gameCanvas {
+  display: block;
+  background: #2A2A2A;
+  touch-action: none;
+}
+.menu-overlay {
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.95);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.menu-content {
+  background: #2A2A2A;
+  padding: 60px 80px;
+  border-radius: 20px;
+  text-align: center;
+  border: 3px solid #8B0000;
+  box-shadow: 0 0 40px rgba(139,0,0,0.5);
+  max-width: 600px;
+}
+.menu-title { font-size: 56px; font-weight: bold; color: #8B0000; margin-bottom: 30px; }
+.menu-subtitle { font-size: 20px; color: #FFD700; margin-bottom: 40px; }
+input[type="text"] {
+  width: 100%; padding: 15px 20px; font-size: 18px;
+  border: 2px solid #556B2F; border-radius: 10px;
+  background: #1a1a1a; color: white; margin-bottom: 30px;
+}
+.difficulty-buttons { display: flex; gap: 15px; justify-content: center; margin-bottom: 30px; }
+.btn {
+  padding: 15px 40px; font-size: 18px; font-weight: bold;
+  border: none; border-radius: 10px; cursor: pointer; transition: all .3s;
+}
+.btn-primary { background: #556B2F; color: white; }
+.btn-primary:hover { background: #6B8E3F; transform: scale(1.05); }
+.btn-difficulty { background: #3a3a3a; color: white; border: 2px solid #555; }
+.btn-difficulty.selected { background: #FFD700; color: #1a1a1a; border-color: #FFD700; }
+.btn-danger { background: #8B0000; color: white; }
+.btn-danger:hover { background: #A00000; transform: scale(1.05); }
+.hidden { display: none; }
+.hud {
+  position: fixed; color: white; font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+  z-index: 100; pointer-events: none;
+}
+#healthBar { top: 20px; left: 20px; }
+#ammoCounter { top: 20px; right: 20px; }
+#waveInfo { top: 20px; left: 50%; transform: translateX(-50%); text-align: center; }
+#weaponIndicator { bottom: 40px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.7); padding: 10px 30px; border-radius: 10px; }
+</style>
+</head>
+<body>
+<!-- ===== Main Menu ===== -->
+<div id="mainMenu" class="menu-overlay">
+  <div class="menu-content">
+    <h1 class="menu-title">ZOMBIE SURVIVAL</h1>
+    <p class="menu-subtitle">Operation Antidote - Unlimited Ammo Edition</p>
+    <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+    <div class="difficulty-buttons">
+      <button class="btn btn-difficulty" data-difficulty="easy">Easy</button>
+      <button class="btn btn-difficulty selected" data-difficulty="normal">Normal</button>
+      <button class="btn btn-difficulty" data-difficulty="hard">Hard</button>
+    </div>
+    <button class="btn btn-primary" id="startGameBtn">Start Game</button>
+  </div>
+</div>
+
+<!-- ===== Canvas & HUD ===== -->
+<canvas id="gameCanvas"></canvas>
+<div id="healthBar" class="hud">HP: 100</div>
+<div id="ammoCounter" class="hud">Ammo: ∞</div>
+<div id="waveInfo" class="hud">Wave 1 | Time: 3:00</div>
+<div id="weaponIndicator" class="hud">Weapon: Pistol</div>
+
+<script>
+/* ===== Game Core ===== */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = innerWidth; canvas.height = innerHeight;
+window.addEventListener('resize', ()=>{canvas.width=innerWidth; canvas.height=innerHeight;});
+
+let gameState = {running:false,paused:false,wave:1,waveTimer:180,score:0};
+let player = {x:canvas.width/2,y:canvas.height/2,width:40,height:40,speed:5,hp:100,maxHp:100,dir:{x:0,y:1}};
+let weapons = {
+  pistol:{damage:20,cooldown:300,lastShot:0,unlimitedAmmo:true},
+  shotgun:{damage:50,cooldown:800,lastShot:0,unlimitedAmmo:true}
+};
+let currentWeapon='pistol';
+let keys={},spaceHeld=false,mouseHeld=false,mousePos={x:0,y:0};
+let zombies=[],projectiles=[];
+let lastSpawn=0;
+const zombieImg=new Image(); zombieImg.src='https://uploads.sitebrew.ai/images/0867cece-b2ad-4b37-bcc6-782d71278d07.png';
+const playerImg=new Image(); playerImg.src='https://uploads.sitebrew.ai/images/7e478cbe-60bb-41b8-bcb2-b208567788c1.png';
+
+document.addEventListener('keydown',e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(e.key==='1')currentWeapon='pistol';
+  if(e.key==='2')currentWeapon='shotgun';
+  if(e.key===' '){spaceHeld=true;}
+});
+document.addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=false;
+  if(e.key===' ')spaceHeld=false;
+});
+canvas.addEventListener('mousedown',()=>mouseHeld=true);
+canvas.addEventListener('mouseup',()=>mouseHeld=false);
+canvas.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect();
+  mousePos.x=e.clientX-r.left; mousePos.y=e.clientY-r.top;
+});
+document.querySelectorAll('.btn-difficulty').forEach(btn=>{
+  btn.onclick=()=>{document.querySelectorAll('.btn-difficulty').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');};
+});
+document.getElementById('startGameBtn').onclick=startGame;
+
+function startGame(){
+  document.getElementById('mainMenu').classList.add('hidden');
+  gameState.running=true; gameLoop();
+}
+
+function shoot(){
+  const w=weapons[currentWeapon]; const now=Date.now();
+  if(now-w.lastShot<w.cooldown)return;
+  w.lastShot=now;
+  const dx=mousePos.x-player.x, dy=mousePos.y-player.y;
+  const len=Math.sqrt(dx*dx+dy*dy)||1;
+  projectiles.push({x:player.x,y:player.y,vx:dx/len*8,vy:dy/len*8,damage:w.damage,life:1000,created:now});
+}
+function spawnZombie(){
+  const side=Math.floor(Math.random()*4);
+  let x=0,y=0;
+  if(side===0){x=Math.random()*canvas.width;y=-30;}
+  if(side===1){x=canvas.width+30;y=Math.random()*canvas.height;}
+  if(side===2){x=Math.random()*canvas.width;y=canvas.height+30;}
+  if(side===3){x=-30;y=Math.random()*canvas.height;}
+  zombies.push({x,y,hp:50,speed:2});
+}
+function update(dt){
+  if(!gameState.running)return;
+  // player move
+  let dx=0,dy=0;
+  if(keys['w']||keys['arrowup'])dy--;
+  if(keys['s']||keys['arrowdown'])dy++;
+  if(keys['a']||keys['arrowleft'])dx--;
+  if(keys['d']||keys['arrowright'])dx++;
+  const len=Math.sqrt(dx*dx+dy*dy);
+  if(len){dx/=len;dy/=len;player.x+=dx*player.speed;player.y+=dy*player.speed;player.dir={x:dx,y:dy};}
+  // spawn zombies
+  const now=Date.now();
+  if(now-lastSpawn>2000){spawnZombie(); lastSpawn=now;}
+  // update zombies
+  zombies.forEach(z=>{
+    const dx=player.x-z.x,dy=player.y-z.y;const d=Math.sqrt(dx*dx+dy*dy)||1;
+    z.x+=dx/d*z.speed*0.6; z.y+=dy/d*z.speed*0.6;
+  });
+  // update projectiles
+  projectiles=projectiles.filter(p=>{
+    p.x+=p.vx; p.y+=p.vy;
+    if(Date.now()-p.created>p.life)return false;
+    zombies.forEach((z,i)=>{
+      if(Math.abs(p.x-z.x)<30&&Math.abs(p.y-z.y)<30){z.hp-=p.damage;if(z.hp<=0)zombies.splice(i,1);}
+    });
+    return true;
+  });
+  // auto fire if holding
+  if(spaceHeld||mouseHeld)shoot();
+}
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // player
+  ctx.drawImage(playerImg,player.x-24,player.y-24,48,48);
+  // zombies
+  zombies.forEach(z=>ctx.drawImage(zombieImg,z.x-20,z.y-20,40,40));
+  // bullets
+  ctx.fillStyle='yellow';
+  projectiles.forEach(p=>ctx.fillRect(p.x,p.y,4,4));
+}
+let last=Date.now();
+function gameLoop(){
+  const now=Date.now(); const dt=now-last; last=now;
+  update(dt); draw();
+  if(gameState.running)requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>
